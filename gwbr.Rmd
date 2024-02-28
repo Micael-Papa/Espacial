@@ -1,0 +1,301 @@
+---
+title: |
+    Universidade de Brasília  
+    Instituto de Exatas  
+    Departamento de Estatística  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    **GWBR for HDI in São Paulo  
+    Spatial Regression**
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+
+
+author: |
+    Micael Egídio Papa da Silva  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+    <br>  
+date: "July 21, 2023"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+header-includes:
+  - \usepackage{titling}
+  - \pretitle{\begin{center}
+    \includegraphics[width=2in,height=2in]{unb_logo.png}\LARGE\\}
+  - \posttitle{\end{center}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=6)
+```
+
+
+
+\newpage
+
+# Introduction
+
+### falar sobre a motivação de estudar a relação espacial dos telefones fixos com os habitantes de sp 
+
+O conjunto de dados consiste em 644 observações e 14 variáveis, algumas das quais contêm informações sobre as localidades, enquanto outras têm potencial explicativo.
+
+# Métodos
+Será utilizada a Regressão Beta devido ao intervalo do índice estar entre 0 e 1. Além disso, foi considerado que a distribuição Beta é muito versátil, alterando seu formato dependendo dos valores de seus parâmetros.
+
+Modelos globais e locais serão ajustados e comparados para verificar qual é mais adequado para esses dados específicos. A abordagem de regressão ponderada geograficamente será utilizada para os modelos locais. Em todos os casos, será empregada a função de ligação logit.
+
+Será coletada e utilizada uma amostra aleatória simples de tamanho 100 para otimizar o uso computacional e permitir o teste de mais modelos.
+
+Todos os cálculos serão realizados utilizando o software $R$ e seus pacotes disponíveis, incluindo o pacote $gwbr$.
+
+# Resultados
+
+Dado que algumas das colunas estão fortemente correlacionadas (como população total e população urbana, por exemplo), para evitar multicolinearidade, apenas três foram inicialmente selecionadas como variáveis explicativas:
+
+- *prop_urb*: Proporção da população urbana;
+- *pop_rural*: População rural;
+- *prop_poor*: Proporção da população pobre (Considerando renda per capita domiciliar igual ou inferior a R$140,00 por mês).
+
+
+```{r include=FALSE}
+## PACKAGES AND DATA ##
+if (!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, sf, sp, knitr, gwbr)
+data("saopaulo")
+saopaulo=force(saopaulo)
+```
+
+```{r include=FALSE}
+## RANDOM SAMPLE ##
+
+set.seed(211029236)
+(samp <- saopaulo %>% sample_n(100))
+```
+
+## Modelo Global 
+
+```{r}
+
+
+global_model <- betareg_gwbr(
+     yvar="prop_landline",
+     xvar=c("prop_urb", "pop_rural","prop_poor"),
+     data=samp,
+     link="logit"
+)
+tab1 <- global_model$parameter_estimates
+kable(tab1, row.names=T, caption="Parameter Estimates for the Global Beta Regression Model.")
+
+```
+
+
+
+
+De acordo com os p-valores da tabela 1, podemos concluir que todos os parametros foram significaticos, com exceção do parametro relacionado a proporção da população em situação de pobreza a um nivel de 5 \%.
+
+Temos que a proporção da população urbana e a população rural possem uma relação positiva com a proporção de telefones fixos por domicilio, ou seja, ao passo que esses valores crescem a variável resposta tende a crescer proporcionalmente.
+
+
+Por outro lado, temos que a proporção da população em situação de pobreza tem estimativas negativas, de modo a indicar que quando seu valor cresce a proporção de telefones fixos por domicilio descresce. 
+
+Dentre as variáveis, a proporção de população urbana possui a relação mais forte e evidente com a variável resposta.
+
+Vale ressaltar que o parametro de precisão $\phi$ foi estimado sendo 24.56 .
+
+
+```{r}
+ggplot() +
+     aes(
+          x = 1:length(global_model$residuals[, "res"]),
+          y = global_model$residuals[, "res"]
+     ) +
+     geom_point() +
+     theme_bw() +
+     labs(x = "ID", y = "Resíduos", title="Resíduos para o modelo de regressão beta global")
+
+
+tab2 <- cbind(global_model$r2, "Log-verossimilhança"=c(global_model$log_likelihood), "AICc"=c(global_model$aicc))
+kable(tab2, row.names=F, caption="
+Medidas de qualidade de ajuste para o modelo de regressão beta global.")
+```
+
+
+
+
+## Escolha da bandwidth
+
+
+A escolha do valor da largura de banda (bandwidth) é uma das partes mais importantes da técnica de regressão geograficamente ponderada. O valor ideal pode ser encontrado por meio do algoritmo de Busca da Seção Áurea (Golden Section Search - GSS), minimizando o Escore de Validação Cruzada (CV) ou o Critério de Informação de Akaike (AIC).
+
+
+```{r include=FALSE}
+## BANDWIDTH CHOICE ##
+
+h1 <- gss_gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+         data=samp, method="fixed_g", link="logit", type="cv")
+h1
+h3 <- gss_gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+         data=samp, method="adaptive_bsq", link="logit", type="cv")
+h3
+h6 <- gss_gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+         data=samp, method="adaptive_bsq", link="logit", type="aic")
+h6
+```
+
+```{r}
+tab3 <- matrix(c(round(h1$global_min, 3), round(h3$global_min, 3), "-", round(h6$global_min, 3)), ncol=2, byrow=T,dimnames=list(c("CV", "AIC"), c("Fixo", "Adaptado")))
+kable(tab3, caption="Escolha da bandwidth via GSS.")
+```
+
+O algoritmo GSS foi executado utilizando as medidas AIC e CV, resultando nos valores mostrados na Tabela 3. Outra variação testada foi o método de cálculo: uma largura de banda fixa com base na distância ou uma largura de banda adaptativa com base nos vizinhos mais próximos.
+
+O método fixo resultou em erro quando usado com o AIC, então apenas três valores de largura de banda foram encontrados. Cada um deles será utilizado para ajustar um modelo local.
+
+## Modelos Locais
+
+
+
+Depois de ajustar os três modelos, algumas medidas podem ser avaliadas para se optar pelo modelo que melhor adequa os dados.
+
+```{r}
+## LOCAL MODELS ##
+
+model1 <- gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+     h=h1$global_min, data=samp, method="fixed_g", link="logit")
+model2 <- gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+     h=h3$global_min, data=samp, method="adaptive_bsq", link="logit")
+
+model3 <- gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+     h=h6$global_min, data=samp, method="adaptive_bsq", link="logit")
+```
+
+```{r}
+tab4 <- as.data.frame(cbind(rbind(model1$r2, model2$r2, model3$r2), rbind(model1$log_likelihood, model2$log_likelihood, model3$log_likelihood), rbind(model1$aic, model2$aic, model3$aic), rbind(model1$aicc, model2$aicc, model3$aicc)))
+names(tab4) <- c("Pseudo R2", "Adj. Pseudo R2", "Log-verossimilhança", "AIC", "AICc")
+row.names(tab4) <- c("h=838.513", "h=40", "h=98")
+kable(tab4, row.names=T, caption="Medidas de ajuste para modelos GWBR por largura de banda.")
+```
+
+
+O modelo com a largura de banda fixa de 838,513 apresenta um ajuste melhor (pseudo-$R^2$ e log-verossimilhança mais altos) e é mais parcimonioso, conforme demonstrado pelos valores mais baixos de AIC e AICc.
+
+Portanto, os resultados que serão apresentados a seguir são todos do modelo com largura de banda fixa de 838,513.
+
+
+```{r}
+#boxplots das estimativas dos parâmetros
+ggplot(
+     data.frame(
+          params = with(model1$parameters, c(Intercept, prop_urb, pop_rural, prop_poor)),
+          cats = rep(c("Intercept", "prop_urb", "pop_rural", "prop_poor"), each=100),
+          globals = rep(global_model$parameter_estimates[-5, "Estimate"], each=100)
+     )
+) +
+     aes(x = cats) +
+     geom_boxplot(aes(y = params)) +
+     geom_point(aes(y=globals), color="red", size=5) +
+     theme_bw() +
+     labs(x = "Parâmetros", y = "Estimativas", title="Erros-padrão para os parâmetros estimados do modelo GWBR")
+```
+
+
+Todas as estimativas de parâmetros parecem estar centralizadas nos seus valores do modelo global, representados como pontos vermelhos.
+
+Nenhum dos parâmetros apresentou uma alta variabilidade, demonstrando ser desnecessário cogitar modelos locais para cada variável tendo em mente a ausência de variações locais. 
+
+
+
+```{r}
+par(mfrow=c(1,1))
+boxplot(model1$parameters[, "std_Intercept"], model1$parameters[, "std_prop_urb"], model1$parameters[, "std_pop_rural"],model1$parameters[, "std_prop_poor"],
+main = "Erros-padrão para as estimativas de parâmetros do modelo GWBR.",
+ylab = "SE",
+names = c("Intercept", "prop_urb","pop_rural" ,"prop_poor"))
+points(x = 1:4,
+       y = global_model$parameter_estimates[-5, "Std. Error"],
+       col = "red",
+       pch = 16)
+```
+
+
+O erro padrão que se distancia um pouco da regressão beta global é apenas o que diz respeito a proporção da população em situação de pobreza.
+```{r}
+tab5 <- matrix(c(round(model1$parameter_estimates_qtls[, "Phi"], 3), round(model1$std_qtls[, "Phi"], 3)), ncol=2, byrow=F,dimnames=list(c("Q1", "Q2", "Q3", "IQR"), c("est", "std error")))
+kable(tab5, col.names=c("$\\phi$ Estimado", "$\\phi$ EP"), caption="Quartis para estimativas de parâmetros de precisão e erros padrão.", escape=FALSE)
+```
+
+
+O parâmetro de precisão $\phi$ foi estimado globalmente como 24.56, sendo bem próximo da mediana das estimativas locais (24.596)
+
+```{r}
+par(mfrow=c(1, 1))
+boxplot(model1$parameters[, "probt_Intercept"], model1$parameters[, "probt_prop_urb"], model1$parameters[, "probt_pop_rural"], model1$parameters[, "probt_prop_poor"], model1$parameters[, "probt_phi"], ylim=c(0, 1), main = "Significance of GWBR Parameters Based on T Tests",
+ylab = "P-values",
+names = c("Intercept", "prop_urb", "pop_rural", "prop_poor", "phi"))
+abline(h=0.05, col="red")
+```
+
+A linha vermelha no gráfico indica o nível de significância de 0,05, facilitando a visualização dos valores p significativos.
+
+O interessante é que, para algumas localidades, o parâmetro da proporção da população pobre não foi significativo, indicando que a relação entre essa variável e o HDIM varia localmente.
+
+```{r}
+plot(model1$residuals[, "res"], xlab="ID", ylab="Residuals", main="Residuals for the GWBR Model")
+```
+
+# Comparando os modelos 
+
+
+Por fim, os modelos global e locais serão ajustados novamente com a exclusão da variável não significativa.
+
+Para fins de comparação, um modelo semiparamétrico também será ajustado, permitindo que o parâmetro prop_urb seja global.
+
+```{r}
+global_model2 <- betareg_gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor" ), data=samp,
+             link="logit")
+h <- gss_gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+         data=samp, method="fixed_g", link="logit", type="cv")
+m <- gwbr(yvar="prop_landline", xvar=c("prop_urb", "pop_rural","prop_poor"), lat="y", long="x",
+     h=h$global_min, data=samp, method="fixed_g", link="logit")
+mixed <- gwbr(yvar="prop_landline", xvar="prop_poor", xglobal="prop_urb", lat="y", long="x",
+     h=h$global_min, data=samp, method="fixed_g", link="logit")
+```
+
+```{r}
+tab6 <- as.data.frame(cbind(rbind(global_model2$r2, m$r2, mixed$r2), rbind(global_model2$log_likelihood, m$log_likelihood, mixed$log_likelihood), rbind(global_model2$aic, m$aic, mixed$aic), rbind(global_model2$aicc, m$aicc, mixed$aicc)))
+names(tab6) <- c("Pseudo R2", "Adj. Pseudo R2", "Log-verossimilhança", "AIC", "AICc")
+row.names(tab6) <- c("Global", "Local", "Mista")
+kable(tab6, row.names=T, caption="Modelos de regressão beta global, local e mista.")
+```
+
+Para todas as medidas apresentadas, o GWBR foi o melhor modelo, seguido pelo BR global. O modelo misto GWBR teve os piores resultados.
+
+# Conclusões
+
+
+A comparação de diferentes métodos para escolher a largura de banda reforçou o quão importante esse parâmetro é para modelos ponderados geograficamente e o quanto ele influencia o resultado do modelo.
+
+Em geral, os modelos GWBR tiveram um desempenho melhor do que a Regressão Beta global, indicando que esses dados são espacialmente não estacionários. A proporção de população urbana, em particular, mostrou fortes indícios de ter uma relação variável localmente com a prop_landline
+
+
+
+
+
+
+
